@@ -288,9 +288,10 @@ export class Dispatcher {
 
   /** Select the repository. */
   public selectRepository(
-    repository: Repository | CloningRepository
+    repository: Repository | CloningRepository,
+    persistSelection: boolean = true
   ): Promise<Repository | null> {
-    return this.appStore._selectRepository(repository)
+    return this.appStore._selectRepository(repository, persistSelection)
   }
 
   /** Change the selected section in the repository. */
@@ -1920,6 +1921,10 @@ export class Dispatcher {
         await this.openOrCloneRepository(url)
       }
     } else if (action.kind === 'open-repository') {
+      if (action.persistSelection === false) {
+        this.appStore._setSecondaryWindow()
+      }
+
       // user may accidentally provide a folder within the repository
       // this ensures we use the repository root, if it is actually a repository
       // otherwise we consider it an untracked repository
@@ -1936,7 +1941,10 @@ export class Dispatcher {
       const existingRepository = matchExistingRepository(repositories, path)
 
       if (existingRepository) {
-        await this.selectRepository(existingRepository)
+        await this.selectRepository(
+          existingRepository,
+          action.persistSelection ?? true
+        )
       } else {
         await this.showPopup({ type: PopupType.AddRepository, path })
       }
