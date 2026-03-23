@@ -958,11 +958,16 @@ export class AppStore extends TypedBaseStore<IAppState> {
 
     this.accountsStore.onDidUpdate(accounts => {
       this.accounts = accounts
-      const endpointTokens = accounts.map<EndpointToken>(
-        ({ endpoint, token }) => ({ endpoint, token })
-      )
 
-      updateAccounts(endpointTokens)
+      if (!this.accountsStore.isSyncing) {
+        const endpointTokens = accounts.map<EndpointToken>(
+          ({ endpoint, token }) => ({ endpoint, token })
+        )
+        const serializedUsers = JSON.stringify(
+          accounts.map(a => a.withToken(''))
+        )
+        updateAccounts(endpointTokens, serializedUsers)
+      }
 
       this.refreshSelectedRepositoryAfterAccountChange()
 
