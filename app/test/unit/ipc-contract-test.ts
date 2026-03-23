@@ -49,6 +49,7 @@ describe('IPC channel contract', () => {
     'focus',
     'blur',
     'update-accounts',
+    'accounts-changed',
     'resolve-image-token',
     'resolved-image-token',
     'quit-and-install-updates',

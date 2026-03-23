@@ -66,7 +66,11 @@ export type RequestChannels = {
   ) => void
   focus: () => void
   blur: () => void
-  'update-accounts': (accounts: ReadonlyArray<EndpointToken>) => void
+  'update-accounts': (
+    accounts: ReadonlyArray<EndpointToken>,
+    serializedUsers: string
+  ) => void
+  'accounts-changed': (serializedUsers: string) => void
   'resolve-image-token': (
     requestId: number,
     endpoint: string,

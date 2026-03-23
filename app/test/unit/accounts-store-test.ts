@@ -2,6 +2,7 @@ import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert'
 import { Account } from '../../src/models/account'
 import { AccountsStore } from '../../src/lib/stores'
+import { getKeyForAccount } from '../../src/lib/auth'
 import { InMemoryStore, AsyncInMemoryStore } from '../helpers/stores'
 import { TokenRefreshEvent } from '../../src/lib/credential-sessions'
 import { OAuthRefreshRejectedError } from '../../src/lib/oauth-token'
@@ -237,6 +238,117 @@ describe('AccountsStore', () => {
         persistedUsers[0].endpoint,
         'https://my-company-repos.com/api/v3'
       )
+    })
+  })
+
+  describe('syncing from IPC', () => {
+    it('loads synced users with tokens from secure storage', async () => {
+      const dataStore = new InMemoryStore()
+      const secureStore = new AsyncInMemoryStore()
+      accountsStore = new AccountsStore(dataStore, secureStore)
+
+      const account = new Account(
+        'joan',
+        'https://api.github.com',
+        'deadbeef',
+        [],
+        '',
+        1,
+        'Joan',
+        'free'
+      )
+      await secureStore.setItem(
+        getKeyForAccount(account),
+        account.login,
+        account.token
+      )
+
+      let syncStateDuringUpdate: boolean | null = null
+      accountsStore.onDidUpdate(() => {
+        syncStateDuringUpdate = accountsStore.isSyncing
+      })
+
+      await accountsStore.syncFromIPC(JSON.stringify([account.withToken('')]))
+
+      const users = await accountsStore.getAll()
+      assert.equal(users.length, 1)
+      assert.equal(users[0].login, 'joan')
+      assert.equal(users[0].token, 'deadbeef')
+      assert.equal(syncStateDuringUpdate, true)
+      assert.equal(accountsStore.isSyncing, false)
+
+      const persistedUsers = JSON.parse(dataStore.getItem('users'))
+      assert.equal(persistedUsers[0].login, 'joan')
+      assert.equal(persistedUsers[0].token, '')
+    })
+
+    it('restores rotating credentials and retires sessions removed by IPC', async () => {
+      const dataStore = new InMemoryStore()
+      const secureStore = new AsyncInMemoryStore()
+      const source = new AccountsStore(dataStore, secureStore)
+      const account = new Account(
+        'joan',
+        'https://api.github.com',
+        'old-access',
+        [],
+        '',
+        1,
+        'Joan'
+      )
+      await source.addAccount(account, {
+        accessToken: 'old-access',
+        refreshToken: 'old-refresh',
+        expiresAt: 0,
+      })
+      let refreshCalls = 0
+      const receiver = new AccountsStore(
+        new InMemoryStore(),
+        secureStore,
+        async () => {
+          refreshCalls++
+          return {
+            accessToken: 'new-access',
+            refreshToken: 'new-refresh',
+            expiresAt: Date.now() + 8 * 60 * 60_000,
+          }
+        }
+      )
+      await receiver.syncFromIPC(dataStore.getItem('users'))
+      const [synced] = await receiver.getAll()
+      assert.equal(synced.token, 'old-access')
+      assert.equal(receiver.isRefreshable(synced), true)
+      assert.equal(
+        (await receiver.getAccountWithFreshToken(synced)).token,
+        'new-access'
+      )
+      assert.equal(refreshCalls, 1)
+
+      await receiver.syncFromIPC('[]')
+      assert.deepEqual(await receiver.getAll(), [])
+      await assert.rejects(
+        receiver.resolveToken(account.endpoint, 'new-access')
+      )
+    })
+
+    it('ignores invalid IPC payloads without changing existing accounts', async () => {
+      const account = new Account(
+        'joan',
+        'https://api.github.com',
+        'deadbeef',
+        [],
+        '',
+        1,
+        'Joan',
+        'free'
+      )
+      await accountsStore.addAccount(account)
+
+      await accountsStore.syncFromIPC('{not json')
+
+      const users = await accountsStore.getAll()
+      assert.equal(users.length, 1)
+      assert.equal(users[0].login, 'joan')
+      assert.equal(users[0].token, 'deadbeef')
     })
   })
 })
