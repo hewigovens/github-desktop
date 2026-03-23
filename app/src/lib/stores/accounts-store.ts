@@ -81,6 +81,12 @@ export class AccountsStore extends TypedBaseStore<ReadonlyArray<Account>> {
   private accounts: ReadonlyArray<Account> = []
   private readonly credentials: CredentialSessions
 
+  /** True when syncing from another window's IPC data. */
+  private _isSyncing = false
+  public get isSyncing() {
+    return this._isSyncing
+  }
+
   /** A promise that will resolve when the accounts have been loaded. */
   private loadingPromise: Promise<void>
 
@@ -408,6 +414,20 @@ export class AccountsStore extends TypedBaseStore<ReadonlyArray<Account>> {
     const migratedAccounts = this.getMigratedGHEAccounts(parsedAccounts)
     const rawAccounts = migratedAccounts ?? parsedAccounts
 
+    const removedInvalidAccounts = await this.loadAccountsWithTokens(
+      rawAccounts
+    )
+    // If any account was migrated, make sure to persist the new value
+    if (migratedAccounts !== null || removedInvalidAccounts) {
+      this.save() // Save already emits an update
+    } else {
+      this.emitUpdate(this.accounts)
+    }
+  }
+
+  private async loadAccountsWithTokens(
+    rawAccounts: ReadonlyArray<IAccount>
+  ): Promise<boolean> {
     // Duplicate endpoints keep the last entry, like CredentialSessions.restore.
     const accountsByEndpoint = new Map<string, Account>()
     let removedInvalidAccounts = false
@@ -451,12 +471,41 @@ export class AccountsStore extends TypedBaseStore<ReadonlyArray<Account>> {
       }
     }
 
+    for (const account of this.accounts) {
+      if (!accountsByEndpoint.has(account.endpoint)) {
+        this.credentials.retire(account.endpoint)
+      }
+    }
     this.accounts = sortAccounts([...accountsByEndpoint.values()])
-    // If any account was migrated, make sure to persist the new value
-    if (migratedAccounts !== null || removedInvalidAccounts) {
-      this.save() // Save already emits an update
-    } else {
-      this.emitUpdate(this.accounts)
+    return removedInvalidAccounts
+  }
+
+  /**
+   * Sync accounts from serialized data received via IPC from another window.
+   */
+  public async syncFromIPC(serializedUsers: string): Promise<void> {
+    await this.loadingPromise
+
+    let parsedAccounts: ReadonlyArray<IAccount>
+    try {
+      const parsed = JSON.parse(serializedUsers)
+      if (!Array.isArray(parsed)) {
+        log.error('Invalid accounts IPC sync payload. Skipping.')
+        return
+      }
+
+      parsedAccounts = parsed
+    } catch (e) {
+      log.error('Error parsing accounts IPC sync payload. Skipping.', e)
+      return
+    }
+
+    this._isSyncing = true
+    try {
+      await this.loadAccountsWithTokens(parsedAccounts)
+      this.save()
+    } finally {
+      this._isSyncing = false
     }
   }
 
