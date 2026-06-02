@@ -299,9 +299,10 @@ export class Dispatcher {
 
   /** Select the repository. */
   public selectRepository(
-    repository: Repository | CloningRepository
+    repository: Repository | CloningRepository,
+    persistSelection: boolean = true
   ): Promise<Repository | null> {
-    return this.appStore._selectRepository(repository)
+    return this.appStore._selectRepository(repository, persistSelection)
   }
 
   /** Change the selected section in the repository. */
@@ -1019,10 +1020,11 @@ export class Dispatcher {
    */
   public async switchWorktree(
     repository: Repository,
-    worktree: WorktreeEntry
+    worktree: WorktreeEntry,
+    persistSelection: boolean = true
   ): Promise<void> {
     await this.appStore
-      ._switchWorktree(repository, worktree)
+      ._switchWorktree(repository, worktree, persistSelection)
       .catch(e => this.postError(e))
   }
 
@@ -2057,6 +2059,10 @@ export class Dispatcher {
         await this.openOrCloneRepository(url)
       }
     } else if (action.kind === 'open-repository') {
+      if (action.persistSelection === false) {
+        this.appStore._setSecondaryWindow()
+      }
+
       // user may accidentally provide a folder within the repository
       // this ensures we use the repository root, if it is actually a repository
       // otherwise we consider it an untracked repository
@@ -2073,7 +2079,10 @@ export class Dispatcher {
       const existingRepository = matchExistingRepository(repositories, path)
 
       if (existingRepository) {
-        await this.selectRepository(existingRepository)
+        await this.selectRepository(
+          existingRepository,
+          action.persistSelection ?? true
+        )
         return
       }
 
@@ -2089,7 +2098,11 @@ export class Dispatcher {
         r => matchExistingRepository(worktrees, r.path) !== undefined
       )
       if (worktree && sharedCommonDirRepository instanceof Repository) {
-        await this.switchWorktree(sharedCommonDirRepository, worktree)
+        await this.switchWorktree(
+          sharedCommonDirRepository,
+          worktree,
+          action.persistSelection ?? true
+        )
         return
       }
 
